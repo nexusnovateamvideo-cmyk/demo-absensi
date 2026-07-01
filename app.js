@@ -507,17 +507,63 @@ function loginAsAccount(acc){
   goView('dashboard');
   loadAttendanceForUser();
   renderAll();
+  resetIdleTimer();
 }
 
 function doLogout(){
   currentUser = null;
+  stopIdleTimer();
   try{ localStorage.removeItem(SESSION_KEY); }catch(e){}
+  try{ localStorage.removeItem(LAST_ACTIVITY_KEY); }catch(e){}
   document.getElementById('app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   showLoginForm();
   document.getElementById('login-email').value = '';
   document.getElementById('login-pass').value = '';
 }
+
+/* ===================== AUTO-LOGOUT KARENA TIDAK AKTIF (IDLE TIMEOUT) ===================== */
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 menit tidak aktif -> logout otomatis
+const LAST_ACTIVITY_KEY = 'nexusnova_last_activity_v1';
+let idleTimer = null;
+
+function recordActivity(){
+  try{ localStorage.setItem(LAST_ACTIVITY_KEY, String(Date.now())); }catch(e){}
+}
+function resetIdleTimer(){
+  if(!currentUser) return;
+  recordActivity();
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(handleIdleLogout, IDLE_TIMEOUT_MS);
+}
+function stopIdleTimer(){
+  clearTimeout(idleTimer);
+  idleTimer = null;
+}
+function handleIdleLogout(){
+  if(!currentUser) return;
+  doLogout();
+  showToast('Sesi berakhir karena tidak aktif selama 15 menit. Silakan masuk kembali.');
+}
+// Kalau tab sempat ditinggal/di-background lalu dibuka lagi, cek apakah sudah lewat 15 menit sejak aktivitas terakhir
+function checkIdleOnResume(){
+  if(!currentUser) return;
+  try{
+    const raw = localStorage.getItem(LAST_ACTIVITY_KEY);
+    const last = raw ? Number(raw) : null;
+    if(last && !isNaN(last) && (Date.now() - last) >= IDLE_TIMEOUT_MS){
+      handleIdleLogout();
+      return;
+    }
+  }catch(e){}
+  resetIdleTimer();
+}
+['mousemove','mousedown','keydown','scroll','touchstart','click'].forEach(evt=>{
+  document.addEventListener(evt, resetIdleTimer, {passive:true});
+});
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible') checkIdleOnResume();
+});
 
 function tryAutoLogin(){
   try{
@@ -527,6 +573,7 @@ function tryAutoLogin(){
     const acc = accounts.find(a=>a.id===s.id);
     if(!acc) return false;
     loginAsAccount(acc);
+    checkIdleOnResume(); // koreksi timer jika ternyata sudah lama tidak aktif sebelum halaman dimuat ulang
     return true;
   }catch(e){ return false; }
 }
